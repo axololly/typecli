@@ -7,6 +7,8 @@ from typing import Any, Callable
 type Func = Callable[..., Any]
 
 class Command:
+    instances: list['Command'] = []
+    
     def __init__(
         self,
         *,
@@ -19,6 +21,8 @@ class Command:
         self.aliases = aliases
         self.callback = callback
         self._callback_params = _params
+
+        self.instances.append(self)
     
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         self.callback(*args, **kwargs)

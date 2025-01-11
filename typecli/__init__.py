@@ -23,18 +23,8 @@ def _build_and_run():
     if exception():
         return
 
-    # Get all `Command` instances from the running file
-    file_commands = [
-        obj for obj in running_file.__dict__.values()
-        if isinstance(obj, Command)
-    ]
-
-    if not file_commands:
-        return
-
     # Build the CLI
     cli = CLI()
-    cli._commands = file_commands
 
     # Run the CLI
     cli.run()
