@@ -1,5 +1,6 @@
+from .colour import error
 from .commands import Command
-from .types import Char, Word, Sentence
+from .types import *
 
 class Parser:
     def __init__(self, valid_commands: list[Command] = []) -> None:
@@ -66,12 +67,12 @@ class Parser:
         command = self._command_lookup.get(tokens[0])
 
         if not command:
-            print(f"No command was found by the name '{tokens[0]}'.")
+            error(f"No command was found by the name '{tokens[0]}'.")
             return
         
         _parameter_lookup = {
             param.name: param
-            for param in command._callback_params
+            for param in command.callback.parameters
         }
         
         current_param_pos = 0
@@ -80,26 +81,41 @@ class Parser:
         callback_args = ()
         callback_kwargs = {}
 
+        addressed_flags: list[str] = []
+
         while current_token_pos < len(tokens):
             token = tokens[current_token_pos]
-            param = command._callback_params[current_param_pos]
+            param = command.callback.parameters[current_param_pos]
 
             # Keyworded arguments
             if param.kind == param.KEYWORD_ONLY:
-                if token != f"-{param.name}":
-                    print(f"Invalid parameter name '{token}': expected '-{param.name}'.")
+                if token.startswith('--'):
+                    flag_param = _parameter_lookup.get(token.removeprefix('--').replace('-', '_'))
+
+                    if flag_param:
+                        addressed_flags.append(flag_param.name)
+
+                        callback_kwargs[flag_param.name] = True
+                        current_token_pos += 1
+                        
+                        continue
+                    else:
+                        error(f"No flag found with the name '{token}'.")
+                
+                if token != f"-{param.name}" and param.default is param.empty:
+                    error(f"Invalid parameter name '{token}': expected '-{param.name}'.")
                     return
 
                 # Check if not EOL
                 if current_token_pos + 1 == len(tokens):
-                    print(f"EOL parsing error: parameter '-{param.name}' had no value.")
+                    error(f"EOL parsing error: parameter '-{param.name}' had no value.")
                     return
                 
                 if param.annotation == Char: # type: ignore
                     next_token = tokens[current_token_pos + 1]
 
                     if len(next_token) != 1:
-                        print(f"Invalid input: expected one character for parameter '-{param.name}' but received {len(next_token)} characters.")
+                        error(f"Invalid input: expected one character for parameter '-{param.name}' but received {len(next_token)} characters.")
                         return
                     
                     callback_kwargs[param.name] = next_token
@@ -127,8 +143,10 @@ class Parser:
                     try:
                         callback_kwargs[param.name] = int(next_token)
                     except ValueError:
-                        print(f"Cannot convert '{next_token}' into a base-10 integer.")
+                        error(f"Cannot convert '{next_token}' into a base-10 integer.")
                         return
+                    
+                    current_token_pos += 1
                 
                 if param.annotation == float:
                     next_token = tokens[current_token_pos + 1]
@@ -136,7 +154,7 @@ class Parser:
                     try:
                         callback_kwargs[param.name] = float(next_token)
                     except ValueError:
-                        print(f"Cannot convert '{next_token}' into a base-10 integer.")
+                        error(f"Cannot convert '{next_token}' into a base-10 integer.")
                         return
                     
                     current_token_pos += 1
@@ -145,7 +163,7 @@ class Parser:
             else:
                 if param.annotation == Char: # type: ignore
                     if len(token) != 1:
-                        print(f"Invalid input: expected one character for parameter '-{param.name}' but received {len(token)} characters.")
+                        error(f"Invalid input: expected one character for parameter '-{param.name}' but received {len(token)} characters.")
                         return
                     
                     callback_args += (token,)
@@ -169,20 +187,29 @@ class Parser:
                     try:
                         callback_args += (int(token),)
                     except ValueError:
-                        print(f"Cannot convert '{token}' into a base-10 integer.")
+                        error(f"Cannot convert '{token}' into a base-10 integer.")
                         return
                 
                 if param.annotation == float:
                     try:
                         callback_args += (float(token),)
                     except ValueError:
-                        print(f"Cannot convert '{token}' into a base-10 integer.")
+                        error(f"Cannot convert '{token}' into a base-10 integer.")
                         return
                     
                     current_token_pos += 1
                 
             current_token_pos += 1
             current_param_pos += 1
+        
+        # Set `False` as the default for all flags
+        # that weren't mentioned
+        callback_kwargs |= {
+            param.name: False
+            for param in command.callback.parameters
+            if param.annotation is Flag
+            and param.name not in addressed_flags
+        }
         
         command.callback(*callback_args, **callback_kwargs)
     

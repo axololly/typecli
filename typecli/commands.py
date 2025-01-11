@@ -1,10 +1,22 @@
-from inspect import _empty as EMPTY_PARAMETER, Parameter, signature as sig
+from inspect import Parameter, signature as sig
 from functools import wraps
 from types import GenericAlias
 from .types import *
 from typing import Any, Callable
 
 type Func = Callable[..., Any]
+
+class Callback:
+    def __init__(self, func: Func) -> None:
+        self._func = func
+        self._parameters = clean_parameters(func)
+    
+    @property
+    def parameters(self) -> list[Parameter]:
+        return self._parameters
+    
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._func(*args, **kwargs)
 
 class Command:
     instances: list['Command'] = []
@@ -14,13 +26,11 @@ class Command:
         *,
         name: str | None = None,
         aliases: list[str] = [],
-        callback: Func,
-        _params: list[Parameter]
+        callback: Func
     ) -> None:
         self.name = name
         self.aliases = aliases
-        self.callback = callback
-        self._callback_params = _params
+        self.callback = Callback(callback)
 
         self.instances.append(self)
     
@@ -34,25 +44,53 @@ class Command:
 def command(*, name: str | None = None, aliases: list[str] = []) -> Callable[..., Command]:
     @wraps(command)
     def wrapper(func: Func) -> Command:
-        params = extract_parameters(func)
-
         return Command(
             name = name or func.__name__,
             aliases = aliases,
-            callback = func,
-            _params = params
+            callback = func
         )
 
     return wrapper
 
+def alias(**aliases: str) -> Callable[[Command], Command]:
+    def wrapper(command: Command) -> Command:
+        lookup = {
+            param.name: (param, pos)
+            for pos, param in enumerate(command.callback.parameters)
+        }
+        
+        for old_name, new_name in aliases.items():
+            if old_name not in lookup:
+                raise LookupError(f"cannot find parameter by the name '{old_name}' in the function '{command.callback._func.__name__}'.")
+        
+            parameter, position = lookup[old_name]
 
-def extract_parameters(func: Func) -> list[Parameter]:
+            command.callback._parameters[position] = parameter.replace(name = new_name)
+
+        return command
+    
+    return wrapper
+
+
+def clean_parameters(func: Func) -> list[Parameter]:
     params = list(sig(func).parameters.values())
 
     encountered_sentence = False
+    encountered_flags = False
 
     for i, param in enumerate(params):
-        if param.kind == EMPTY_PARAMETER:
+        if param.annotation is Flag:
+            if not encountered_flags:
+                encountered_flags = True
+            
+            if param.kind is not param.KEYWORD_ONLY:
+                raise TypeError("Flag types must be attached to a keyworded argument.")
+            continue
+        else:
+            if encountered_flags:
+                raise TypeError(f"parameter '{param.name}' cannot come after a flag type. Flags must be after all arguments.")
+        
+        if param.kind == param.empty:
             raise TypeError(f"parameter '{param.name}' is missing a typehint.")
         
         if isinstance(param.annotation, GenericAlias):

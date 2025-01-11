@@ -28,6 +28,9 @@ class Word(_BuiltinType):
 class Sentence(_BuiltinType):
     "Greedy type that takes all content up until a keyworded argument is shown."
 
+class Flag(_BuiltinType):
+    "A type that becomes a boolean when included."
+
 # ============================================================================== #
 
 type Positional[T] = T
