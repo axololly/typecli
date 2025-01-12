@@ -1,28 +1,13 @@
 from .colour import error
-from .commands import Command
+from .commands import Command, CommandLookup
 from .types import *
 
 class Parser:
-    def __init__(self, valid_commands: list[Command] = []) -> None:
-        if not valid_commands:
+    def __init__(self, commands: CommandLookup = Command.instances) -> None:
+        if not commands:
             raise ValueError("list of valid commands is empty.")
-
-        taken_aliases = set(cmd.name for cmd in valid_commands)
-
-        for command in valid_commands:
-            for alias in command.aliases:
-                if alias in taken_aliases:
-                    raise ValueError(f"alias '{alias}' has already been taken by another command. Choose a different alias.")
         
-        self._commands = valid_commands
-        self._command_lookup = {
-            cmd.name: cmd
-            for cmd in self._commands
-        } | {
-            alias: cmd
-            for cmd in self._commands
-            for alias in cmd.aliases
-        }
+        self._commands = commands
 
     def collect_args(self, raw_text: str) -> list[str]:
         args = []
@@ -64,7 +49,7 @@ class Parser:
     def parse(self, tokens: list[str]) -> None:
         "Parse and run the given tokens."
 
-        command = self._command_lookup.get(tokens[0])
+        command = self._commands.get(tokens[0])
 
         if not command:
             error(f"No command was found by the name '{tokens[0]}'.")
@@ -89,6 +74,7 @@ class Parser:
 
             # Keyworded arguments
             if param.kind == param.KEYWORD_ONLY:
+                # Potentially a flag parameter
                 if token.startswith('--'):
                     flag_param = _parameter_lookup.get(token.removeprefix('--').replace('-', '_'))
 

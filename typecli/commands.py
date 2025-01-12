@@ -1,10 +1,12 @@
-from inspect import Parameter, signature as sig
+from .colour import warn
+from inspect import cleandoc, Parameter, signature as sig
 from functools import wraps
 from types import GenericAlias
 from .types import *
 from typing import Any, Callable
 
 type Func = Callable[..., Any]
+
 
 class Callback:
     def __init__(self, func: Func) -> None:
@@ -18,17 +20,73 @@ class Callback:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self._func(*args, **kwargs)
 
+
+class CommandLookup:
+    """
+    A helper class that allows for searching commands by
+    name and also by index.
+
+    Allows for O(1) lookup time when searching for commands.
+    """
+
+    __slots__ = ('_name_to_index', '_stored_commands')
+
+    def __init__(self) -> None:
+        "Create an empty command lookup."
+
+        self._name_to_index = {}
+        self._stored_commands = []
+    
+    def __getitem__(self, index: int | str) -> 'Command':
+        if isinstance(index, int):
+            return self._stored_commands[index]
+        elif isinstance(index, str):
+            return self._stored_commands[
+                self._name_to_index[index]
+            ]
+        else:
+            raise TypeError(f"type '{type(index)}' is not a valid index type.")
+    
+    def append(self, command: 'Command', /) -> None:
+        "Add a command to the list of commands."
+
+        if command.name in self._name_to_index:
+            raise ValueError(f"name '{command.name}' has already been taken by another command or alias. Choose a different name.")
+
+        for alias in command.aliases:
+            if alias in self._name_to_index:
+                raise ValueError(f"alias '{alias}' has already been taken by another command. Choose a different alias.")
+            
+            self._name_to_index[alias] = len(self._stored_commands)
+
+        self._name_to_index[command.name] = len(self._stored_commands)
+        self._stored_commands.append(command)
+
+    def get(self, name: str, /) -> 'Command | None':
+        """
+        Gets a command from the internal lookup table, returning
+        `None` if it wasn't found.
+        """
+        
+        if name not in self._name_to_index:
+            return None
+        
+        return self[name]
+
+
 class Command:
-    instances: list['Command'] = []
+    instances: CommandLookup = CommandLookup()
     
     def __init__(
         self,
         *,
         name: str | None = None,
+        description: str,
         aliases: list[str] = [],
         callback: Func
     ) -> None:
         self.name = name
+        self.description = description
         self.aliases = aliases
         self.callback = Callback(callback)
 
@@ -46,11 +104,13 @@ def command(*, name: str | None = None, aliases: list[str] = []) -> Callable[...
     def wrapper(func: Func) -> Command:
         return Command(
             name = name or func.__name__,
+            description = cleandoc(func.__doc__ or "No description provided."),
             aliases = aliases,
             callback = func
         )
 
     return wrapper
+
 
 def alias(**aliases: str) -> Callable[[Command], Command]:
     def wrapper(command: Command) -> Command:
@@ -91,7 +151,7 @@ def clean_parameters(func: Func) -> list[Parameter]:
                 raise TypeError(f"parameter '{param.name}' cannot come after a flag type. Flags must be after all arguments.")
         
         if param.kind == param.empty:
-            raise TypeError(f"parameter '{param.name}' is missing a typehint.")
+            warn(f"parameter '{param.name}' is missing a typehint.")
         
         if isinstance(param.annotation, GenericAlias):
             annot = param.annotation
@@ -99,6 +159,9 @@ def clean_parameters(func: Func) -> list[Parameter]:
             if annot.__origin__ is Positional:
                 if param.kind == param.KEYWORD_ONLY:
                     raise TypeError(f"parameter '{param.name}' is aliased as positional but programmed as keyworded.")
+
+                if param.kind == param.POSITIONAL_ONLY:
+                    warn(f"parmeter '{param.name}' is already a positional argument - type annotation is redundant.")
 
                 params[i] = param.replace(
                     kind = param.POSITIONAL_ONLY,
@@ -108,6 +171,9 @@ def clean_parameters(func: Func) -> list[Parameter]:
             elif annot.__origin__ is Keyworded:
                 if param.kind == param.POSITIONAL_ONLY:
                     raise TypeError(f"parameter '{param.name}' is aliased as keyworded but programmed as postional.")
+                
+                if param.kind == param.KEYWORD_ONLY:
+                    warn(f"parmeter '{param.name}' is already a positional argument - type annotation is redundant.")
                 
                 params[i] = param.replace(
                     kind = param.KEYWORD_ONLY,
